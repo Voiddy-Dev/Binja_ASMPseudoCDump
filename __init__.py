@@ -16,7 +16,7 @@ from binaryninja.binaryview import BinaryView
 from binaryninja.enums import DisassemblyOption, FunctionAnalysisSkipOverride
 from binaryninja.function import DisassemblySettings, Function
 from binaryninja.interaction import get_directory_name_input
-from binaryninja.linearview import LinearViewCursor, LinearViewObject
+from binaryninja.lineardisassembly import LinearViewCursor, LinearViewObject
 from binaryninja.log import log_alert, log_error, log_info, log_warn
 from binaryninja.plugin import BackgroundTaskThread, PluginCommand
 
@@ -78,7 +78,7 @@ class AsmPseudoCDump(BackgroundTaskThread):
         """Creates a timestamped directory for the dump."""
         directory_name = "".join(
             (
-                f"PseudoCDump_{ntpath.basename(self.bv.file.filename)}_",
+                f"decompiled_code_{ntpath.basename(self.bv.file.filename)}_",
                 str(calendar.timegm(time.gmtime())),
             )
         )
@@ -185,9 +185,23 @@ def get_assembly(bv: BinaryView, function: Function) -> str:
     settings.set_option(DisassemblyOption.ShowAddress, True)
     settings.set_option(DisassemblyOption.WaitForIL, True)
 
-    # get_linear_disassembly iterates over the function's linear view
-    for line in function.get_linear_disassembly(settings):
+    obj = LinearViewObject.disassembly(bv, settings)
+    cursor = LinearViewCursor(obj)
+
+    # Get the header (lines before the entry point)
+    cursor.seek_to_address(function.start)
+    header_lines = bv.get_previous_linear_disassembly_lines(cursor)
+    for line in header_lines:
         lines.append(f"{str(line)}\n")
+
+    # Get the body
+    cursor.seek_to_address(function.start)
+    while cursor.current_object.start <= function.highest_address:
+        for line in cursor.lines:
+            lines.append(f"{str(line)}\n")
+
+        if not cursor.next():
+            break
 
     return "".join(lines)
 
@@ -205,7 +219,7 @@ def dump_pseudo_c_and_asm(bv: BinaryView, function=None) -> None:
 
 
 PluginCommand.register_for_address(
-    "Pseudo C & ASM Dump",
+    "Pseudo C and ASM Dump",
     "Dumps Pseudo C and Assembly for the whole code base",
     dump_pseudo_c_and_asm,
 )
